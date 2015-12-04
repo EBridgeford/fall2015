@@ -1,27 +1,44 @@
+/*
+Eric Bridgeford
+CSE486 HW6
+Dr. Michael Zmuda
+*/
+
 #include <iostream>
 #include <vector>
 #include <regex>
 #include <fstream>
 #include <string>
 #include <set>
-#include <utility>
+#include <chrono>
+#include <unordered_map>
 
+//Map to store classifiers/values and their probability
+std::unordered_map<std::string, float> probMap;
+
+//File reader
 std::vector<std::string> readFile(std::string filename) {
   // Read each line of the given file into a vector.
-  std::ifstream readFile;
-  readFile.open(filename);
-  std::string tempLine;
+  std::ifstream readFile(filename);
   std::vector<std::string> stringVector;
+
+  if (!readFile.is_open()) {
+    return stringVector;
+  }
+
+  std::string tempLine;
+
   while (!readFile.eof()) {
     getline(readFile, tempLine);
     stringVector.push_back(tempLine);
   }
-
+  readFile.close();
   // Shrink the vector and return it to the function caller.
   stringVector.shrink_to_fit();
   return stringVector;
 }
 
+//Reads data into a 2D vector of strings
 std::vector<std::vector<std::string> > parseData(std::vector<std::string> data) {
 
   std::vector<std::vector<std::string> > dataArr(data.size()-1);
@@ -40,6 +57,11 @@ std::vector<std::vector<std::string> > parseData(std::vector<std::string> data) 
   return dataArr;
 }
 
+/*
+Parses the 2D vector produced by parseData and creates a vector of sets of strings.
+The vector cooresponds to the column, and the set contains unique values within that
+column. So uniqueValues[0] is the set of all values in column 1.
+*/
 std::vector<std::set<std::string>> uniqueValues(std::vector<std::vector<std::string>> data) {
 
   std::vector<std::set<std::string> > uniqueValues(data[0].size());
@@ -53,53 +75,6 @@ std::vector<std::set<std::string>> uniqueValues(std::vector<std::vector<std::str
   return uniqueValues;
 }
 
-void classifierProb(std::vector<std::set<std::string>> uniqueValues, std::vector<std::vector<std::string>> data) {
-
-  std::vector<std::pair<std::string, int>> posValues;
-
-  for (auto j: uniqueValues[uniqueValues.size()-1]) {
-    int count = 0;
-    std::cout << "Found ";
-    for (unsigned int i = 0; i < data.size(); i++) {
-      if (j ==  data[i][data[i].size()-1]) {
-        count++;
-      }
-    }
-    std::cout << count << " instances of " << j << std::endl;
-  }
-}
-
-void otherProb(std::vector<std::set<std::string>> uniqueValues, std::vector<std::vector<std::string>> data) {
-
-  std::cout << "POSTIVE" << std::endl;
-  for (unsigned int y = 0; y < uniqueValues.size()-1; y++) {
-    for (auto j: uniqueValues[y]) {
-      int count = 0;
-      std::cout << "Found ";
-      for (unsigned int i = 0; i < data.size(); i++) {
-        if (j ==  data[i][y] && data[i][data[i].size()-1] == "1") {
-          count++;
-        }
-      }
-      std::cout << count << " postive instances of " << j << std::endl;
-    }
-  }
-  std::cout << "NEGATIVE" << std::endl;
-  for (unsigned int y = 0; y < uniqueValues.size()-1; y++) {
-    for (auto j: uniqueValues[y]) {
-      int count = 0;
-      std::cout << "Found ";
-      for (unsigned int i = 0; i < data.size(); i++) {
-        if (j ==  data[i][y] && data[i][data[i].size()-1] == "0") {
-          count++;
-        }
-      }
-      std::cout << count << " negative instances of " << j << std::endl;
-    }
-  }
-}
-
-
 void printUnique(std::vector<std::set<std::string>> values) {
 
   for (unsigned int i = 0; i < values.size(); i++) {
@@ -111,10 +86,13 @@ void printUnique(std::vector<std::set<std::string>> values) {
 
 }
 
-int probability(std::vector<std::vector<std::string>> data, std::string classifier, std::string value, int col) {
+/*
+
+
+*/
+int occur(std::vector<std::vector<std::string>> data, std::string classifier, std::string value, int col) {
 
   int count = 0;
-  //std::cout << "Found ";
   for (unsigned int i = 0; i < data.size(); i++) {
     if (value ==  data[i][col] && data[i][data[i].size()-1] == classifier) {
       count++;
@@ -142,50 +120,96 @@ void printStuff(std::vector<std::vector<std::string>> result, std::vector<std::s
     for (auto y: values[i]) {
 
       for (auto j: values[values.size()-1]) {
-        std::cout << "Found " << probability(result,j,y,i) << " instances of " << y << " with the classifier " << j << std::endl;
+        std::cout << "Found " << occur(result,j,y,i) << " instances of " << y << " with the classifier " << j << std::endl;
       }
       std::cout << "Total instances of " << y << " found are " << total(result,y,i) << std::endl;
     }
   }
 }
 
-void bayesClassifier(std::vector<std::vector<std::string>> result, std::vector<std::set<std::string>> values) {
+float bayesClassifier(std::vector<std::vector<std::string>> result, std::vector<std::set<std::string>> values) {
 
-  for (auto i: values[values.size()-1]) {
+  float totalGuess = 0;
+  float totalCorrect = 0;
 
+  for (unsigned int i = 0; i < result.size(); i++) {
+    float lineProb = 0;
+    float predictionProb = 0;
+    std::string predictionClassifier = "";
 
-    float saveValue = 0;
-    float classifierOccurances = total(result,i,values.size()-1);
-    float totalLines = result.size();
-    float classifierResult = classifierOccurances/totalLines;
+    for (auto j: values[values.size()-1]) {
 
-    for (unsigned int m = 0; m < result.size()-1; m++) {
+      auto search = probMap.find(j);
+      if (search == probMap.end()) {
 
-      float tempResult = classifierResult;
-      for (auto y: values[m]) {
-          float totalValue = total(result,y,m);
-        for (auto j: values[values.size()-1]) {
-          float probValue = probability(result,j,y,m);
-          float probValue2 = probValue/totalValue;
-          tempResult = probValue2 * classifierResult;
+        float classifierOccurances = total(result,j,values.size()-1);
+        float totalLines = result.size();
+        float classifierResult = classifierOccurances/totalLines;
+        probMap.emplace(j, classifierResult);
+        lineProb = classifierResult;
+        //std::cout << "Value for " << j << " is " << classifierResult << std::endl;
+      } else {
+        lineProb = search->second;
+      }
+
+      for (unsigned int m = 0; m < result[m].size()-1; m++) {
+        float probValue2;
+        auto search = probMap.find(j+result[i][m]);
+        if (search == probMap.end()) {
+
+          float probValue = occur(result,j,result[i][m],m);
+          float totalValue = total(result,result[i][m],m);
+          probValue2 = probValue/totalValue;
+          probMap.emplace(j+result[i][m], probValue2);
+          //std::cout << "Value for " << j+result[i][m] << " is " << probValue2 << std::endl;
+
+        } else {
+          probValue2 = search->second;
         }
 
+        lineProb *= probValue2;
+
+      }
+      if (lineProb >  predictionProb) {
+        predictionProb = lineProb;
+        predictionClassifier = j;
       }
     }
+
+    totalGuess++;
+
+    if (predictionClassifier == result[i][result[i].size()-1]) {
+      totalCorrect++;
+    }
+    //std::cout << "Prediction for line " << i << " is classifier " << predictionClassifier << " with prob of " << predictionProb;
+    //std::cout << " actual is " << result[i][result[i].size()-1] << std::endl;
+    //std::cout << "Current percent of correct guesses " << totalCorrect/totalGuess << std::endl;
   }
+  return totalCorrect/totalGuess;
 }
+
 int main() {
 
-  std::vector<std::string> test = readFile("data2.txt");
-
-  std::vector<std::vector<std::string>> result = parseData(test);
-  auto values = uniqueValues(result);
-  //classifierProb(values, result);
-  //otherProb(values, result);
-  //probability(result, "1", "L", 0);
-  //printStuff(result,values);
-  bayesClassifier(result,values);
+  std::vector<std::string> dataSets = {"data0.txt","24242.txt","data1.txt", "data2.txt", "data3.txt","classdata.txt"};
 
 
+  for (auto i: dataSets) {
 
+    auto start = std::chrono::high_resolution_clock::now();
+    std::vector<std::string> test = readFile(i);
+
+    if (test.empty()) {
+      std::cout << "File " << i << " not read correctly, not processing" << std::endl;
+    } else {
+      auto result = parseData(test);
+      auto values = uniqueValues(result);
+      float correct = bayesClassifier(result,values);
+
+
+      auto end = std::chrono::system_clock::now();
+      std::chrono::duration<double> elapsed_seconds = end-start;
+      std::cout << i << ": Percentage correct " << correct << ", Time taken " << elapsed_seconds.count() << std::endl;
+      probMap.clear();
+    }
+  }
 }
